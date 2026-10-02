@@ -20,6 +20,13 @@ async function init() {
 
   document.getElementById('form').addEventListener('submit', onSubmit);
 
+  // 数据抽样预览（只读，不提交作业）
+  InputPreview.mount();
+  const mt = document.getElementById('num_map_tasks');
+  const syncMapHint = () => { document.getElementById('pv_maptasks-hint').textContent = mt.value; };
+  mt.addEventListener('input', syncMapHint);
+  syncMapHint();
+
   document.getElementById('func-list').innerHTML =
     '<h3>Map</h3>' + funcs.mappers.map(f =>
       `<div class="small" style="padding:2px 0"><span class="mono">${C.esc(f.name)}</span> — ${C.esc(f.description)}</div>`).join('') +
@@ -27,6 +34,11 @@ async function init() {
       `<div class="small" style="padding:2px 0"><span class="mono">${C.esc(f.name)}</span> — ${C.esc(f.description)}</div>`).join('');
 
   loadRecent();
+  API.get('/api/overview').then(d => {
+    const roots = d.preview_roots || [];
+    if (roots.length) document.getElementById('pv_path').placeholder =
+      '允许目录 allowed root: ' + roots[0] + (roots.length > 1 ? ` (+${roots.length - 1})` : '');
+  }).catch(() => {});
 }
 
 function fillSelect(id, items) {

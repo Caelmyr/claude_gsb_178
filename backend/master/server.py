@@ -18,9 +18,12 @@ from flask import Flask, Response, jsonify, request, send_from_directory
 
 from backend.common import constants as C
 from backend.common.config import ClusterConfig, ConfigManager, JobDefaults
+from backend.common.input_sampler import (
+    PreviewError, discover_file_sources, memory_sources, preview_sources,
+)
 from backend.common.logbus import LogBus
 from backend.common.models import Job
-from backend.common.storage import Storage, list_files, read_json
+from backend.common.storage import Storage, ensure_dir, list_files, read_json
 from backend.master.fault_tolerance import FaultTolerance
 from backend.master.job_manager import JobManager
 from backend.master.metrics import Metrics
@@ -57,6 +60,11 @@ class Master:
         )
 
         self.app = Flask("master", static_folder=FRONTEND_DIR, static_url_path="")
+        # The preview only parses capped byte ranges, but still refuse giant
+        # uploads before they reach a worker thread.
+        self.app.config["MAX_CONTENT_LENGTH"] = 64 * 1024 * 1024
+        self.preview_root = os.path.join(self.storage.root, "inputs")
+        ensure_dir(self.preview_root)
         self._register_routes()
 
     # ------------------------------------------------------------------
@@ -77,6 +85,9 @@ class Master:
         app.add_url_rule("/api/overview", "overview", self._overview, methods=["GET"])
         app.add_url_rule("/api/functions", "functions", self._functions, methods=["GET"])
         app.add_url_rule("/api/samples", "samples", self._samples, methods=["GET"])
+        app.add_url_rule("/api/preview/path", "preview_path", self._preview_path, methods=["POST"])
+        app.add_url_rule("/api/preview/upload", "preview_upload", self._preview_upload, methods=["POST"])
+        app.add_url_rule("/api/preview/text", "preview_text", self._preview_text, methods=["POST"])
         app.add_url_rule("/api/jobs", "jobs", self._jobs, methods=["GET", "POST"])
         app.add_url_rule("/api/jobs/<job_id>", "job_detail", self._job_detail, methods=["GET"])
         app.add_url_rule("/api/jobs/<job_id>/cancel", "job_cancel", self._job_cancel, methods=["POST"])
@@ -163,6 +174,7 @@ class Master:
             "jobs_cancelled": sum(1 for j in jobs if j.status == C.JOB_CANCELLED),
             "workers": self.registry.summary(),
             "config": self.config.to_dict(),
+            "preview_roots": self._preview_roots(),
             "recent_jobs": [self.job_manager.job_summary(j) for j in jobs[:10]],
         })
 
@@ -171,6 +183,81 @@ class Master:
 
     def _samples(self):
         return jsonify(list_sample_jobs())
+
+    # ------------------------------------------------------------------
+    # Pre-submission input preview (read-only sampling; never runs a job)
+    # ------------------------------------------------------------------
+    def _preview_roots(self) -> list[str]:
+        extra = list(getattr(self.config, "preview_allowed_paths", []) or [])
+        roots = [self.preview_root] + [os.path.abspath(p) for p in extra if p.strip()]
+        # de-duplicate while preserving order
+        seen: set[str] = set()
+        out: list[str] = []
+        for r in roots:
+            if r not in seen:
+                seen.add(r)
+                out.append(r)
+        return out
+
+    @staticmethod
+    def _preview_kwargs(body: dict) -> dict:
+        return {
+            "sample_size": body.get("sample_size", 20),
+            "num_map_tasks": body.get("num_map_tasks", 8),
+            "delimiter": body.get("delimiter") or None,
+            "has_header": body.get("has_header"),
+        }
+
+    def _preview_path(self):
+        body = request.get_json(silent=True) or {}
+        target = str(body.get("path") or "").strip()
+        try:
+            sources = discover_file_sources(target, self._preview_roots())
+            result = preview_sources(
+                sources,
+                source_meta={"mode": "path", "path": target,
+                             "allowed_roots": self._preview_roots()},
+                **self._preview_kwargs(body),
+            )
+        except PreviewError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        return jsonify(result)
+
+    def _preview_upload(self):
+        uploads = request.files.getlist("files")
+        files: list[tuple[str, bytes]] = []
+        for up in uploads:
+            files.append((up.filename or "upload", up.read()))
+        if not files:
+            return jsonify({"ok": False,
+                            "error": "未收到上传文件 No files uploaded"}), 400
+        try:
+            result = preview_sources(
+                memory_sources(files),
+                source_meta={"mode": "upload",
+                             "names": [name for name, _ in files]},
+                **self._preview_kwargs(request.form),
+            )
+        except PreviewError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        return jsonify(result)
+
+    def _preview_text(self):
+        body = request.get_json(silent=True) or {}
+        text = body.get("text")
+        if text is None:
+            return jsonify({"ok": False,
+                            "error": "未提供文本内容 No text provided"}), 400
+        name = str(body.get("name") or "pasted-input.txt")
+        try:
+            result = preview_sources(
+                memory_sources([(name, str(text).encode("utf-8"))]),
+                source_meta={"mode": "text", "name": name},
+                **self._preview_kwargs(body),
+            )
+        except PreviewError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 400
+        return jsonify(result)
 
     def _jobs(self):
         if request.method == "POST":

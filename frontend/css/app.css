@@ -412,3 +412,53 @@ fieldset legend { font-size: 13px; font-weight: 600; color: var(--ink-2); paddin
 details.accordion { border: 1px solid var(--border); border-radius: var(--radius-sm); margin-bottom: 8px; }
 details.accordion summary { cursor: pointer; padding: 10px 14px; font-weight: 600; }
 details.accordion .body { padding: 4px 14px 14px; }
+
+/* =========================================================================
+   数据抽样预览 Input sampling preview
+   ========================================================================= */
+.pv-modes { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 10px; }
+.pv-mode { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; font-weight: 600; cursor: pointer; }
+.pv-mode input { width: auto; margin: 0; }
+.pv-mode-panel { margin-bottom: 6px; }
+.pv-mode-panel textarea { width: 100%; box-sizing: border-box; font-family: var(--mono); font-size: 12.5px; }
+.pv-opts { align-items: flex-end; }
+.pv-run-cell { margin-left: auto; }
+.pv-loading { opacity: 0.55; pointer-events: none; transition: opacity .15s; }
+
+.pv-head { margin-bottom: 10px; }
+.pv-errors { padding: 10px 0; }
+.pv-okline { padding: 6px 0 10px; }
+
+.pv-warnings { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.pv-warnings .pv-warn { display: flex; gap: 10px; align-items: flex-start; padding: 7px 10px;
+  border-radius: var(--radius-sm); font-size: 12.5px; line-height: 1.45;
+  background: var(--surface-2); border-left: 3px solid var(--muted); }
+.pv-warnings .pv-error { background: color-mix(in srgb, var(--critical) 10%, transparent);
+  border-left-color: var(--critical); }
+.pv-warnings .pv-warn:not(.pv-error) { border-left-color: var(--serious); }
+.pv-warnings .pv-info { border-left-color: var(--series-3); }
+
+.pv-chips { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 6px 0 12px; }
+.pv-chip { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px;
+  background: var(--surface-2); border-radius: var(--radius-sm); min-width: 0; }
+.pv-chip .bold { font-size: 14px; word-break: break-word; }
+@media (max-width: 860px) { .pv-chips { grid-template-columns: repeat(2, 1fr); } }
+
+.pv-covwrap { border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 10px 12px; background: color-mix(in srgb, var(--surface) 60%, transparent); }
+.pv-cov { display: grid; grid-template-columns: 220px 1fr 64px; align-items: center;
+  gap: 10px; margin-bottom: 8px; }
+.pv-cov:last-child { margin-bottom: 0; }
+.pv-hint { margin: 8px 0 0; line-height: 1.5; }
+.pv-shards { display: flex; gap: 3px; flex-wrap: wrap; }
+.pv-shard { flex: 1 1 0; min-width: 26px; text-align: center; font-size: 11.5px;
+  line-height: 22px; border-radius: 4px; font-variant-numeric: tabular-nums;
+  background: var(--surface-2); color: var(--muted); border: 1px solid var(--border); }
+.pv-shard.hit { background: color-mix(in srgb, var(--good) 18%, transparent);
+  color: var(--good); border-color: color-mix(in srgb, var(--good) 40%, transparent); font-weight: 700; }
+.pv-shard.miss { opacity: 0.75; }
+.pv-cells { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.pv-cell { background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 4px; padding: 1px 6px; font-family: var(--mono); font-size: 12px; }
+.small-badge { font-size: 11px; padding: 1px 7px; font-weight: 600; }
+.pv-files summary { cursor: pointer; padding: 6px 0; }

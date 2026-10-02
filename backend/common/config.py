@@ -59,6 +59,7 @@ class ClusterConfig:
     demo_mode: bool = False                      # simulate work for fast UI demos
     default_input_rows: int = 12000              # generated input size for sample jobs
     seed: int = 20260930
+    preview_allowed_paths: list[str] = field(default_factory=list)  # extra read-only roots for data preview
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -87,6 +88,7 @@ class ClusterConfig:
             demo_mode=_bool(self.demo_mode, False),
             default_input_rows=_int(self.default_input_rows, 12000, 10, 10_000_000),
             seed=_int(self.seed, 20260930, 0, 2 ** 31 - 1),
+            preview_allowed_paths=[str(p) for p in (self.preview_allowed_paths or []) if str(p).strip()],
         )
 
 

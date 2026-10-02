@@ -70,12 +70,72 @@
     </div>
 
     <div class="card mt">
+      <h2>数据抽样预览 <span class="sub">Input sampling preview</span></h2>
+      <p class="small muted" style="margin:-6px 0 10px">
+        提交前只读抽样检查输入，不执行作业。Read-only sampling before submitting — the job is never run.
+        大文件只读头部/中部/尾部与分片边界的少量字节，碎分片会跨步打开多个文件。</p>
+
+      <div class="pv-modes">
+        <label class="pv-mode"><input type="radio" name="pv_mode" value="path" checked> 服务器路径 Server path</label>
+        <label class="pv-mode"><input type="radio" name="pv_mode" value="upload"> 上传文件 Upload</label>
+        <label class="pv-mode"><input type="radio" name="pv_mode" value="text"> 粘贴文本 Paste text</label>
+      </div>
+
+      <div id="pv_mode_path" class="pv-mode-panel">
+        <label>输入路径 Input path <span class="hint">（文件 / 目录 / glob，如 <code>job1/**/*.csv</code>；限制在允许目录内）</span></label>
+        <input id="pv_path" type="text" placeholder="data/inputs 下的相对路径，或配置允许的目录">
+      </div>
+      <div id="pv_mode_upload" class="pv-mode-panel" style="display:none">
+        <label>选择数据文件 Choose data file(s)</label>
+        <input id="pv_files" type="file" multiple>
+      </div>
+      <div id="pv_mode_text" class="pv-mode-panel" style="display:none">
+        <label>粘贴原始数据 Paste raw records</label>
+        <textarea id="pv_text" rows="5" placeholder="每行一条记录，可含表头 / 空行 / 任意分隔符"></textarea>
+      </div>
+
+      <div class="row pv-opts">
+        <div>
+          <label>样本条数 Samples</label>
+          <input id="pv_samples" type="number" min="1" max="200" value="20">
+        </div>
+        <div>
+          <label>分隔符 Delimiter</label>
+          <select id="pv_delim">
+            <option value="">自动 Auto</option>
+            <option value=",">逗号 Comma ,</option>
+            <option value="\t">制表符 Tab</option>
+            <option value="|">竖线 Pipe |</option>
+            <option value=";">分号 Semicolon ;</option>
+            <option value="ws">空白 Whitespace</option>
+          </select>
+        </div>
+        <div>
+          <label>表头 Header</label>
+          <select id="pv_header">
+            <option value="auto">自动 Auto</option>
+            <option value="yes">首行是表头 Yes</option>
+            <option value="no">无表头 No</option>
+          </select>
+        </div>
+        <div class="pv-run-cell">
+          <button id="pv_run" class="btn primary" type="button">抽样预览 Preview</button>
+        </div>
+      </div>
+      <p class="small muted" style="margin:4px 0 0">
+        分片规划复用上方「Map 任务数」（当前 <span id="pv_maptasks-hint">8</span>）；可改完再预览。</p>
+
+      <div id="pv_result" class="mt"></div>
+    </div>
+
+    <div class="card mt">
       <h2>最近作业 <span class="sub">Recent jobs</span></h2>
       <div id="recent"></div>
     </div>
   </main>
   <script src="js/api.js"></script>
   <script src="js/components.js"></script>
+  <script src="js/preview.js"></script>
   <script src="js/pages/submit.js"></script>
 </body>
 </html>

@@ -24,6 +24,59 @@ from backend.common.http_client import HttpClient
 from backend.common.ids import new_id
 
 
+def cmd_preview(args) -> None:
+    """Read-only data sampling preview without booting a cluster or running a job."""
+    from backend.common.input_sampler import (
+        PreviewError, discover_file_sources, memory_sources, preview_sources,
+    )
+
+    data_root = os.path.abspath(args.data or "data")
+    roots = [os.path.join(data_root, "inputs")]
+    os.makedirs(roots[0], exist_ok=True)
+    if args.allow:
+        roots.extend(os.path.abspath(p) for p in args.allow.split(os.pathsep) if p)
+    if args.text is not None:
+        sources = memory_sources([(args.name or "pasted-input.txt", args.text.encode("utf-8"))])
+        meta = {"mode": "text", "name": args.name or "pasted-input.txt"}
+    else:
+        try:
+            sources = discover_file_sources(args.path or ".", roots)
+        except PreviewError as exc:
+            print(f"[preview] {exc}")
+            sys.exit(2)
+        meta = {"mode": "path", "path": args.path or ".", "allowed_roots": roots}
+
+    result = preview_sources(
+        sources,
+        sample_size=args.samples,
+        num_map_tasks=args.map_tasks,
+        delimiter=args.delimiter or None,
+        has_header={"yes": True, "no": False, "auto": None}.get(args.header, None),
+        source_meta=meta,
+    )
+    s, c = result["summary"], result["coverage"]
+    print("== 数据抽样预览 Input preview (只读 read-only) ==")
+    print(f"文件 files: {s['files_total']}  大小 bytes: {s['bytes_total']}  "
+          f"行数 lines: {s['lines_total']}{'' if s['lines_exact'] else ' (估算 est.)'}  "
+          f"空行 blank: {s['blank_lines_total']}")
+    print(f"主流列数 dominant columns: {s['columns_dominant']}  "
+          f"分隔符 delimiter: {result['params']['delimiter_label'] or 'plain text'}  "
+          f"表头 header: {result['params']['has_header']}  编码 encodings: {s['encodings']}")
+    print(f"覆盖 coverage: 打开 {c['files_opened']}/{c['files_total']} 文件, "
+          f"抽样 {c['bytes_probed']} 字节 ({c['bytes_pct']}%), "
+          f"分片 {c['shards_with_samples']}/{c['shards_total']}")
+    for w in result["warnings"]:
+        print(f"  [{w['severity'].upper():5}] {w['code']}: {w['message']}")
+    print(f"-- 样本 samples ({len(result['samples'])}) --")
+    for rec in result["samples"]:
+        loc = f"sh{rec['shard_index']}"
+        if rec.get("split_hint"):
+            loc += f" {rec['split_hint']}"
+        line = f"L{rec['lineno']}" if rec["lineno"] else f"@{rec['offset']}"
+        cols = f" [{rec['columns']}列]" if rec["columns"] else (" [空行 blank]" if rec["blank"] else "")
+        print(f"  {loc:>8} {rec['region']:<6} {line:>9} {rec['file']}: {rec['raw'][:100]}{cols}")
+
+
 # ---------------------------------------------------------------------------
 def _base_data_root(args) -> str:
     return os.path.abspath(getattr(args, "data", None) or "data")
@@ -162,6 +215,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_worker.add_argument("--exec-mode", choices=("process", "thread"), default="process")
     p_worker.add_argument("--demo", action="store_true", help="shrink work for quick UI demos")
     p_worker.set_defaults(func=cmd_worker)
+
+    p_preview = sub.add_parser("preview", help="sample-preview input data without running a job")
+    p_preview.add_argument("path", nargs="?", default="", help="file/dir/glob under data/inputs (or --allow roots)")
+    p_preview.add_argument("--data", default="data")
+    p_preview.add_argument("--allow", default="", help="extra read-only root dirs, separated by ':'")
+    p_preview.add_argument("--samples", type=int, default=20)
+    p_preview.add_argument("--map-tasks", type=int, default=8)
+    p_preview.add_argument("--delimiter", default="", help=", | ; tab/\\t ws, or empty for auto")
+    p_preview.add_argument("--header", choices=("auto", "yes", "no"), default="auto")
+    p_preview.add_argument("--text", default=None, help="preview raw text instead of a path")
+    p_preview.add_argument("--name", default="", help="display name for --text")
+    p_preview.set_defaults(func=cmd_preview)
 
     p_demo = sub.add_parser("demo", help="boot a Master + N Workers and submit a job")
     p_demo.add_argument("--workers", type=int, default=3)
