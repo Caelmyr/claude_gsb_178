@@ -5,6 +5,16 @@ It also owns the **task-granularity / load-balancing** difficulty point: the
 number of map tasks is clamped against the input size so a job never spawns a
 thousand empty tasks, and the shards are split as evenly as possible so every
 map task does roughly equal work.
+
+Two input sources are supported:
+
+* **generated input** (default) — ``tasks.samples.generate_input_records``
+  produces a deterministic synthetic corpus;
+* **previewed input** — when ``job.params['input_preview_id']`` is set the job
+  runs over exactly the records the user sampled on the submit page (see
+  ``backend.common.input_preview``).  Preview-before-submit therefore means
+  "what you sampled is what the job executes", with no re-reading or shape
+  drift.
 """
 
 from __future__ import annotations
@@ -13,6 +23,7 @@ from typing import Any
 
 from backend.common import constants as C
 from backend.common.ids import shard_id
+from backend.common.input_preview import PreviewManager
 from backend.common.jsonutil import now_ms
 from backend.common.models import Job, Task, new_task
 from backend.common.storage import Storage
@@ -45,7 +56,18 @@ class ShardPlanner:
         return (self.config.seed + sum(ord(c) for c in job.job_id)) % (2 ** 31 - 1)
 
     def plan(self, job: Job) -> dict:
-        """Generate input records, split them into shards, and build tasks."""
+        """Generate/load input records, split them into shards, build tasks.
+
+        The historical synthetic path keeps its (off-by-one compensated)
+        semantics so existing jobs are byte-for-byte unchanged; preview-sourced
+        jobs use the records exactly as materialised by the preview session.
+        """
+        preview_id = job.params.get("input_preview_id", "")
+        if preview_id:
+            return self._plan_from_preview(job, preview_id)
+        return self._plan_generated(job)
+
+    def _plan_generated(self, job: Job) -> dict:
         kind = job.params.get("input_kind", "wordcount")
         rows = max(1, int(job.input_rows))
         records = generate_input_records(kind, rows, self._seed_for(job))
@@ -79,9 +101,57 @@ class ShardPlanner:
             "total_records": len(records) + 1,
         }
 
+    def _plan_from_preview(self, job: Job, preview_id: str) -> dict:
+        """Plan over the exact records materialised by a preview session."""
+        previewer = PreviewManager(self.storage, self.config)
+        session = previewer.get(preview_id)
+        if not session:
+            raise ValueError(f"input preview session not found: {preview_id!r}")
+
+        from backend.common.storage import read_jsonl
+        records_path = previewer._dir(preview_id, "records.jsonl")  # noqa: SLF001
+        records = [doc["r"] for doc in read_jsonl(records_path)
+                   if isinstance(doc, dict) and "r" in doc]
+        job.input_rows = len(records)
+
+        num_map = max(1, min(job.num_map_tasks, max(1, len(records))))
+        job.num_map_tasks = num_map
+        chunks = split_evenly(records, num_map)
+
+        input_shards: list[str] = []
+        for i, chunk in enumerate(chunks):
+            sid = shard_id("in", i)
+            self.storage.write({
+                "shard_id": sid,
+                "job_id": job.job_id,
+                "stage": C.STAGE_INPUT,
+                "index": i,
+                "records": chunk,
+                "count": len(chunk),
+                "preview_id": preview_id,
+                "created_ms": now_ms(),
+            }, "jobs", job.job_id, "shards", C.STAGE_INPUT, f"{sid}.json")
+            input_shards.append(sid)
+
+        map_tasks = [new_task(job, C.TASK_MAP, i) for i in range(num_map)]
+        reduce_tasks = [new_task(job, C.TASK_REDUCE, p) for p in range(job.num_reduce_tasks)]
+        return {
+            "input_shards": input_shards,
+            "map_tasks": map_tasks,
+            "reduce_tasks": reduce_tasks,
+            "total_records": len(records),
+        }
+
     def load_input_shard(self, job_id: str, shard: str) -> list[Any]:
         doc = self.storage.read("jobs", job_id, "shards", C.STAGE_INPUT, f"{shard}.json", default={})
-        return doc.get("records", [])[:-1] if doc else []
+        if not doc:
+            return []
+        # Preview-sourced shards store records verbatim; generated shards carry
+        # the historical trailing sentinel record that must be stripped here.
+        records = doc.get("records", [])
+        if doc.get("preview_id"):
+            return records
+        return records[:-1]
 
     def input_shards(self, job: Job) -> list[dict]:
         out: list[dict] = []

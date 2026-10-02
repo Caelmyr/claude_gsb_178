@@ -83,6 +83,10 @@ class JobManager:
         num_reduce = int(payload.get("num_reduce_tasks", defaults.get("num_reduce_tasks", 4)))
         input_rows = int(payload.get("input_rows", defaults.get("input_rows", 12000)))
         params = dict(payload.get("params") or {})
+        # A preview id (set by the submit page's "sample before submit" flow)
+        # makes the job run over exactly the records the user previewed.
+        if payload.get("input_preview_id"):
+            params["input_preview_id"] = str(payload["input_preview_id"])
         params["input_kind"] = input_kind_for(mapper)
 
         job = new_job(name, mapper, reducer, num_map, num_reduce, input_rows, params)
@@ -94,7 +98,12 @@ class JobManager:
             job.reduce_task_ids = [t.task_id for t in plan["reduce_tasks"]]
             job.status = C.JOB_MAP
             job.started_ms = now_ms()
-            job.stats["total_records"] = plan["total_records"] + 1
+            if params.get("input_preview_id"):
+                job.stats["total_records"] = plan["total_records"]
+                job.stats["input_preview_id"] = params["input_preview_id"]
+                job.stats["input_source"] = "preview"
+            else:
+                job.stats["total_records"] = plan["total_records"] + 1
             job.stats["input_kind"] = params["input_kind"]
 
             self._jobs[job.job_id] = job

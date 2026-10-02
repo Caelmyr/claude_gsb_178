@@ -58,6 +58,7 @@ class ClusterConfig:
     metric_interval_sec: float = 2.0             # metric sample cadence
     demo_mode: bool = False                      # simulate work for fast UI demos
     default_input_rows: int = 12000              # generated input size for sample jobs
+    input_root: str = "inputs"                   # server-side dir the preview "path" source is rooted at
     seed: int = 20260930
 
     def to_dict(self) -> dict:
@@ -86,6 +87,7 @@ class ClusterConfig:
             metric_interval_sec=_num(self.metric_interval_sec, 2.0, 0.5, 60.0),
             demo_mode=_bool(self.demo_mode, False),
             default_input_rows=_int(self.default_input_rows, 12000, 10, 10_000_000),
+            input_root=str(self.input_root or "inputs"),
             seed=_int(self.seed, 20260930, 0, 2 ** 31 - 1),
         )
 

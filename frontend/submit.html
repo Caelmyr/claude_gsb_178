@@ -58,7 +58,7 @@
 
           <div class="mt flex">
             <button class="btn primary" type="submit">提交作业 Submit Job</button>
-            <span class="hint">提交后跳转至监控页 After submit, open the Monitor page.</span>
+            <span class="hint" id="submit-hint">提交后跳转至监控页 After submit, open the Monitor page.</span>
           </div>
         </form>
       </div>
@@ -67,6 +67,85 @@
         <h2>可用函数 <span class="sub">Available functions</span></h2>
         <div id="func-list"></div>
       </div>
+    </div>
+
+    <div class="card mt" id="preview-card">
+      <h2>提交前抽样预览 <span class="sub">Sample input before submitting</span></h2>
+      <p class="page-desc" style="margin-top:0">
+        只抽样、不执行作业：展示样本所在的文件/行号与将要覆盖的 Map 分片，并对空文件、列数不一致、编码乱码等形态给出提示。
+        Sampling only — the job is never executed; each sample shows its file/line and the map shard it belongs to, with anomaly hints.
+      </p>
+
+      <div class="row" style="align-items:flex-end">
+        <div style="flex:0 0 auto">
+          <label>数据来源 Input source</label>
+          <select id="pv-source">
+            <option value="synthetic">内置生成 Generated</option>
+            <option value="files">上传文件 Upload files</option>
+            <option value="path">服务器路径 Server path</option>
+            <option value="paste">粘贴文本 Paste text</option>
+          </select>
+        </div>
+        <div id="pv-kind-box" style="flex:0 0 auto">
+          <label>输入类型 Input kind</label>
+          <select id="pv-kind">
+            <option value="wordcount">文本 Text（wordcount/grep/…）</option>
+            <option value="kv">键值 KV（JSONL key/value）</option>
+          </select>
+        </div>
+        <div style="flex:0 0 110px">
+          <label>Map 分片数 Shards</label>
+          <input id="pv-num-map" type="number" min="1" max="200" value="8">
+        </div>
+        <div style="flex:0 0 auto;display:flex;gap:8px;align-items:center">
+          <button class="btn" type="button" id="pv-run">抽样预览 Sample</button>
+        </div>
+      </div>
+
+      <div id="pv-files-box" class="mt" style="display:none">
+        <label>选择分片文件（可多选，碎片文件也会逐一覆盖）Shard files (multi-select)</label>
+        <input id="pv-files" type="file" multiple>
+      </div>
+      <div id="pv-path-box" class="mt" style="display:none">
+        <label>服务器上的文件或目录（相对于 inputs 根目录，多个用 ; 分隔）Path relative to the inputs root, ; separated</label>
+        <input id="pv-path" type="text" placeholder="例如 data/2026-10/ 或 a.csv;b.csv">
+      </div>
+      <div id="pv-paste-box" class="mt" style="display:none">
+        <label>粘贴文本内容 Paste raw text</label>
+        <textarea id="pv-paste" rows="4" style="width:100%;font-family:monospace" placeholder="每行一条记录 one record per line"></textarea>
+      </div>
+
+      <div class="row mt" style="align-items:center">
+        <div style="flex:0 0 150px">
+          <label>字段分隔 Delimiter</label>
+          <select id="pv-delim">
+            <option value="auto">自动 Auto</option>
+            <option value=",">逗号 Comma ,</option>
+            <option value=";">分号 Semicolon ;</option>
+            <option value="&#9;">制表符 Tab</option>
+            <option value="|">竖线 Pipe |</option>
+            <option value=" ">空白 Whitespace</option>
+          </select>
+        </div>
+        <div style="flex:0 0 150px">
+          <label>表头 Header row</label>
+          <select id="pv-header">
+            <option value="auto">自动 Auto</option>
+            <option value="true">首行是表头 Has header</option>
+            <option value="false">无表头 No header</option>
+          </select>
+        </div>
+        <div style="flex:0 0 auto">
+          <label style="display:flex;align-items:center;gap:6px;margin-top:18px">
+            <input id="pv-skip-blank" type="checkbox" checked style="width:auto">
+            作业跳过空行 Skip blank lines
+          </label>
+        </div>
+        <div class="spacer" style="flex:1 1 auto"></div>
+        <span id="pv-stale" class="small" style="color:var(--serious);display:none">参数已修改，请重新抽样 Options changed — please re-sample.</span>
+      </div>
+
+      <div id="pv-result" class="mt"></div>
     </div>
 
     <div class="card mt">

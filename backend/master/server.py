@@ -18,6 +18,7 @@ from flask import Flask, Response, jsonify, request, send_from_directory
 
 from backend.common import constants as C
 from backend.common.config import ClusterConfig, ConfigManager, JobDefaults
+from backend.common.input_preview import PreviewManager, list_preview_sessions
 from backend.common.logbus import LogBus
 from backend.common.models import Job
 from backend.common.storage import Storage, list_files, read_json
@@ -45,6 +46,7 @@ class Master:
         self.config = (config or self.config_manager.load_cluster()).validated()
 
         self.logbus = LogBus(self.storage)
+        self.previewer = PreviewManager(self.storage, self.config)
         self.job_manager = JobManager(self.storage, self.config, self.logbus)
         self.registry = WorkerRegistry(self.storage, self.config)
         self.metrics = Metrics(self.storage)
@@ -77,6 +79,12 @@ class Master:
         app.add_url_rule("/api/overview", "overview", self._overview, methods=["GET"])
         app.add_url_rule("/api/functions", "functions", self._functions, methods=["GET"])
         app.add_url_rule("/api/samples", "samples", self._samples, methods=["GET"])
+        app.add_url_rule("/api/input/preview", "input_preview", self._input_preview,
+                         methods=["POST"])
+        app.add_url_rule("/api/input/preview/<preview_id>", "input_preview_get",
+                         self._input_preview_get, methods=["GET"])
+        app.add_url_rule("/api/input/previews", "input_previews", self._input_previews,
+                         methods=["GET"])
         app.add_url_rule("/api/jobs", "jobs", self._jobs, methods=["GET", "POST"])
         app.add_url_rule("/api/jobs/<job_id>", "job_detail", self._job_detail, methods=["GET"])
         app.add_url_rule("/api/jobs/<job_id>/cancel", "job_cancel", self._job_cancel, methods=["POST"])
@@ -171,6 +179,95 @@ class Master:
 
     def _samples(self):
         return jsonify(list_sample_jobs())
+
+    # ------------------------------------------------------------------
+    # Pre-submission input sampling preview (never executes a job)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _preview_int(form: dict, key: str, default: int, minimum: int = 1) -> int:
+        try:
+            return max(minimum, int(form.get(key, default)))
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _preview_bool(form: dict, key: str, default: bool) -> bool:
+        value = form.get(key, default)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.strip().lower() in ("1", "true", "yes", "on")
+        return default
+
+    def _input_preview(self):
+        """Sample the described input and return shape stats + sample records.
+
+        Accepts either ``application/json`` (synthetic / paste / server-path
+        sources) or ``multipart/form-data`` (browser file uploads).  Nothing is
+        scheduled or executed; the session is stored so a subsequent job POST
+        carrying ``input_preview_id`` runs over exactly these records.
+        """
+        uploads: list[tuple[str, bytes]] = []
+        if request.content_type and request.content_type.startswith("multipart/form-data"):
+            form = request.form.to_dict()
+            uploads = [(f.filename or f"input-{i}", f.read())
+                       for i, f in enumerate(request.files.getlist("files")) if f.filename]
+        else:
+            form = request.get_json(silent=True) or {}
+            for item in form.get("uploads") or []:
+                name = str(item.get("name", ""))
+                content = item.get("content", "")
+                if isinstance(content, str):
+                    uploads.append((name, content.encode("utf-8", errors="replace")))
+                elif isinstance(content, (bytes, bytearray)):
+                    uploads.append((name, bytes(content)))
+
+        source = str(form.get("source") or "synthetic")
+        if source not in ("synthetic", "files", "path", "paste"):
+            return jsonify({"error": f"unknown source: {source!r}"}), 400
+        paths_raw = form.get("paths") or form.get("path") or ""
+        if isinstance(paths_raw, str):
+            paths = [p.strip() for p in paths_raw.split(";") if p.strip()]
+        elif isinstance(paths_raw, list):
+            paths = [str(p) for p in paths_raw]
+        else:
+            paths = []
+
+        delimiter = str(form.get("delimiter") or "auto")
+        header_flag = form.get("has_header", "auto")
+        has_header = None
+        if isinstance(header_flag, bool):
+            has_header = header_flag
+        elif str(header_flag).lower() in ("true", "1", "yes", "on"):
+            has_header = True
+        elif str(header_flag).lower() in ("false", "0", "no", "off"):
+            has_header = False
+
+        kwargs = dict(
+            paths=paths,
+            uploads=uploads,
+            paste_text=str(form.get("paste_text") or ""),
+            synthetic_kind=str(form.get("synthetic_kind") or "wordcount"),
+            rows=self._preview_int(form, "input_rows", 12000, minimum=1),
+            delimiter=delimiter,
+            has_header=has_header,
+            skip_blank=self._preview_bool(form, "skip_blank", True),
+            num_map_tasks=self._preview_int(form, "num_map_tasks", 8),
+        )
+        try:
+            session = self.previewer.create(source, **kwargs)
+        except (ValueError, KeyError, OSError) as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify(session), 201
+
+    def _input_preview_get(self, preview_id: str):
+        session = self.previewer.get(preview_id)
+        if session is None:
+            return jsonify({"error": f"unknown preview {preview_id}"}), 404
+        return jsonify(session)
+
+    def _input_previews(self):
+        return jsonify({"previews": list_preview_sessions(self.storage)})
 
     def _jobs(self):
         if request.method == "POST":
